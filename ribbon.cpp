@@ -38,11 +38,12 @@ void run(size_t num_items, double eps, size_t seed, unsigned num_threads) {
          << " r=" << kResultBits;
 
     rocksdb::StopWatchNano timer(true);
-    rocksdb::StopWatchNano timer_constr(true);
 
     auto input = std::make_unique<int[]>(num_items);
     std::iota(input.get(), input.get() + num_items, 0);
     LOG1 << "Input generation took " << timer.ElapsedNanos(true) / 1e6 << "ms";
+
+    rocksdb::StopWatchNano timer_constr(true);
 
     ribbon_filter<depth, Config> r(num_slots, slots_per_item, seed);
 
@@ -81,7 +82,7 @@ void run(size_t num_items, double eps, size_t seed, unsigned num_threads) {
 
 	rocksdb::StopWatchNano timer_query_dep(true);	
     for (size_t v = 0; v < N; v++) {
-       	found = r.QueryFilter((int)v ^ found);
+       	found = r.QueryFilter((int)v ^ (found * 0xdeadbeefdeadf00dULL * v)); 
     }
 	uint64_t dep_time = timer_query_dep.ElapsedNanos(true);
 	LOG1 << "Dependent queries (" << found << "): " << dep_time / 1e6 << "ms, " << num_items << " keys, "<< (double)dep_time / N << " ns/key\n";
