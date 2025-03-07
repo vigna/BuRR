@@ -38,6 +38,7 @@ void run(size_t num_items, double eps, size_t seed, unsigned num_threads) {
          << " r=" << kResultBits;
 
     rocksdb::StopWatchNano timer(true);
+    rocksdb::StopWatchNano timer_constr(true);
 
     auto input = std::make_unique<int[]>(num_items);
     std::iota(input.get(), input.get() + num_items, 0);
@@ -64,91 +65,26 @@ void run(size_t num_items, double eps, size_t seed, unsigned num_threads) {
     LOG1 << "Ribbon size: " << bytes << " Bytes = " << (bytes * 1.0) / num_items
          << " Bytes per item = " << relsize << "%\n";
 
-    std::atomic<bool> ok = true;
-    auto pos_query = [&r, &ok, &num_items, &num_threads](unsigned id) {
-        bool my_ok = true;
-        size_t start = num_items / num_threads * id;
-        // don't do the same queries on all threads
-        for (size_t v = start; v < num_items; v++) {
-            bool found = r.QueryFilter((int)v);
-            assert(found);
-            my_ok &= found;
-        }
-        for (size_t v = 0; v < start; v++) {
-            bool found = r.QueryFilter((int)v);
-            assert(found);
-            my_ok &= found;
-        }
-        if (!my_ok)
-            ok = false;
-    };
-    std::vector<std::thread> threads;
-    for (unsigned i = 0; i < num_threads && !no_queries; i++) {
-        threads.emplace_back(pos_query, i);
-    }
-    for (auto& t : threads)
-        t.join();
+	uint64_t constr_time = timer_constr.ElapsedNanos(true);
+	LOG1 << "Completed in " << constr_time / 1e6 << "ms, " << num_items << " keys, " << (double)constr_time / num_items << " ns/key\n";
 
-    const auto check_nanos = timer.ElapsedNanos(true);
-    LOG1 << "Parallel check with " << num_threads << " threads "
-         << (ok ? "successful" : "FAILED") << " and took " << check_nanos / 1e6
-         << "ms = " << check_nanos * 1.0 / num_items << "ns per key";
-    // r.PrintStats();
+	const uint64_t N = 10000000;
+	bool found = false;
 
-    std::atomic<size_t> found = 0;
-    auto neg_query = [&r, &found, &num_items, &num_threads](unsigned id) {
-        size_t my_found = 0;
-        // offset queries between threads
-        size_t start = num_items + num_items / num_threads * id;
-        for (size_t v = start; v < 2 * num_items; v++) {
-            my_found += r.QueryFilter((int)v);
-        }
-        for (size_t v = num_items; v < start; v++) {
-            my_found += r.QueryFilter((int)v);
-        }
-        found.fetch_add(my_found);
-    };
-    threads.clear();
-    for (unsigned i = 0; i < num_threads && !no_queries; i++) {
-        threads.emplace_back(neg_query, i);
+	rocksdb::StopWatchNano timer_query_indep(true);
+    for (size_t v = 0; v < N; v++) {
+       	found ^= r.QueryFilter((int)v);
     }
-    for (auto& t : threads)
-        t.join();
+	uint64_t indep_time = timer_query_indep.ElapsedNanos(true);
+	LOG1 << "Independent queries (" << found << "): " << indep_time / 1e6 << "ms, " << num_items << " keys, " << (double)indep_time / N << " ns/key\n";
 
-    const auto negq_nanos = timer.ElapsedNanos(true);
-    const double fprate = found * 1.0 / (num_threads * num_items),
-                 ratio = fprate * (1ul << Config::kResultBits);
-    LOG1 << "Negative queries took " << negq_nanos / 1e6
-         << "ms = " << negq_nanos * 1.0 / num_items << "ns per key, " << found
-         << " FPs = " << fprate * 100 << "%, expecting "
-         << 100.0 / (1ul << Config::kResultBits) << "% -> ratio = " << ratio;
-    // r.PrintStats();
-    auto [tl_bumped, tl_empty_slots, tl_frac_empty, tl_thresh_bytes] =
-        r.GetStats();
-    auto level_stats = r.GetLevelStats();
-    std::cout << "RESULT n=" << num_items << " m=" << num_slots << " eps=" << eps
-         << " backsubstns=" << backsubstTime << " insertionns=" << insertionTime
-         << " d=" << (int)depth << dump_config<Config>() << " bytes=" << bytes
-         << " tlempty=" << tl_empty_slots << " tlbumped=" << tl_bumped
-         << " tlemptyfrac=" << tl_frac_empty
-         << " tlthreshbytes=" << tl_thresh_bytes << " overhead=" << relsize - 100
-         << " ok=" << ok << " tpos=" << check_nanos
-         << " tpospq=" << (check_nanos * 1.0 / num_items) << " tneg=" << negq_nanos
-         << " tnegpq=" << (negq_nanos * 1.0 / num_items) << " fps=" << found
-         << " fpr=" << fprate << " ratio=" << ratio << " threads=" << num_threads;
-    uint64_t sort_total = 0;
-    ssize_t total_bumped = 0;
-    for (size_t i = 0; i < level_stats.size(); ++i) {
-        std::cout << " numbumped" << i << "=" << level_stats[i].num_bumped;
-        std::cout << " emptyslots" << i << "=" << level_stats[i].empty_slots;
-        std::cout << " numthreads" << i << "=" << level_stats[i].num_threads;
-        std::cout << " sortns" << i << "=" << level_stats[i].sort_time;
-        std::cout << " size" << i << "=" << level_stats[i].size;
-        sort_total += level_stats[i].sort_time;
-        total_bumped += level_stats[i].num_bumped;
+
+	rocksdb::StopWatchNano timer_query_dep(true);	
+    for (size_t v = 0; v < N; v++) {
+       	found = r.QueryFilter((int)v ^ found);
     }
-    std::cout << " totalbumped=" << total_bumped;
-    std::cout << " sortns=" << sort_total << "\n";
+	uint64_t dep_time = timer_query_dep.ElapsedNanos(true);
+	LOG1 << "Dependent queries (" << found << "): " << dep_time / 1e6 << "ms, " << num_items << " keys, "<< (double)dep_time / N << " ns/key\n";
 }
 
 
