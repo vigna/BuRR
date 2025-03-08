@@ -84,9 +84,9 @@ void run(size_t num_items, double eps, size_t seed, unsigned num_threads) {
 
 	rocksdb::StopWatchNano timer_query_dep(true);	
 	key = 0;
-    for (size_t v = 0; v < N; v++) {
+        for (size_t v = 0; v < N; v++) {
 		key += 0x9e3779b97f4a7c15;
-       	found = r.QueryFilter((int)key ^ (found * 0xdeadbeefdeadf00dULL * v)); 
+       	found = r.QueryFilter((int)key ^ found) 
     }
 	uint64_t dep_time = timer_query_dep.ElapsedNanos(true);
 	LOG1 << "Dependent queries (" << found << "): " << dep_time / 1e6 << "ms, " << num_items << " keys, "<< (double)dep_time / N << " ns/key\n";
