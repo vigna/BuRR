@@ -67,29 +67,32 @@ void run(size_t num_items, double eps, size_t seed, unsigned num_threads) {
          << " Bytes per item = " << relsize << "%\n";
 
 	uint64_t constr_time = timer_constr.ElapsedNanos(true);
-	LOG1 << "Completed in " << constr_time / 1e6 << "ms, " << num_items << " keys, " << (double)constr_time / num_items << " ns/key\n";
+	LOG1 << "Completed in " << constr_time / 1e6 << "ms, " << num_items << " keys, " << (double)constr_time / num_items << " ns/key";
 
-	const uint64_t N = 10000000;
-	bool found = false;
+	const uint64_t N = 100000000;
+    const int REPEATS = 5;
+    bool found = false;
 
-	rocksdb::StopWatchNano timer_query_indep(true);
-	int key = 0;
-    for (size_t v = 0; v < N; v++) {
-		key += 0x9e3779b97f4a7c15;
-       	found ^= r.QueryFilter((int)key);
-    }
-	uint64_t indep_time = timer_query_indep.ElapsedNanos(true);
-	LOG1 << "Independent queries (" << found << "): " << indep_time / 1e6 << "ms, " << num_items << " keys, " << (double)indep_time / N << " ns/key\n";
-
-
-	rocksdb::StopWatchNano timer_query_dep(true);	
-	key = 0;
+    std::vector<double> timings;
+    
+    for (int k = 0; k < REPEATS; k++) {
+        rocksdb::StopWatchNano timer_query(true);
+	    int key = 0;
         for (size_t v = 0; v < N; v++) {
-		key += 0x9e3779b97f4a7c15;
-       	found = r.QueryFilter((int)key ^ found);
+    		key += 0x9e3779b97f4a7c15;
+       	    found ^= r.QueryFilter((int)key);
+        }
+        double timing = (double)timer_query.ElapsedNanos(true) / N;
+        LOG1 << timing << " ns/key";
+        timings.push_back(timing);
     }
-	uint64_t dep_time = timer_query_dep.ElapsedNanos(true);
-	LOG1 << "Dependent queries (" << found << "): " << dep_time / 1e6 << "ms, " << num_items << " keys, "<< (double)dep_time / N << " ns/key\n";
+
+    sort(timings.begin(), timings.end());
+
+    LOG1 << "Min: " << timings[0] << " Median: " << timings[timings.size() / 2]
+         << " Max: " << timings[timings.size() - 1] << " Average: "
+         << reduce(timings.begin(), timings.end(), 0.0) / timings.size() << " ("
+         << found << ")";
 }
 
 
