@@ -79,7 +79,8 @@ constexpr unsigned thresh_meta_bits =
     /* Some more additions */                                                   \
     [[maybe_unused]] static constexpr auto kCoeffBits =                         \
         static_cast<Index>(sizeof(CoeffRow) * 8U);                              \
-    [[maybe_unused]] static constexpr auto kResultBits = Config::kResultBits;   \
+    [[maybe_unused]] static constexpr auto kResultBits =                        \
+        RibbonConfig::kResultBits;                                              \
     [[maybe_unused]] static constexpr Index kBucketSize =                       \
         RibbonConfig::kBucketSize;                                              \
     [[maybe_unused]] static constexpr Index kMinBucketsPerThread =              \
@@ -293,7 +294,7 @@ template <size_t coeff_bits, size_t result_bits, ThreshMode mode = ThreshMode::t
 struct RConfig
     : public DefaultConfig<at_least_t<coeff_bits>, at_least_t<result_bits>, Key> {
     using Super =
-        DefaultConfig<at_least_t<coeff_bits>, at_least_t<result_bits>, int>;
+        DefaultConfig<at_least_t<coeff_bits>, at_least_t<result_bits>, Key>;
     using Index = uint32_t;
     static constexpr Index kResultBits = result_bits;
     static constexpr ThreshMode kThreshMode =
