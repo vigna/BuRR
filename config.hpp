@@ -176,7 +176,7 @@ public:
     // An unsigned type that is large enough to hold the maximum index in the
     // input (i.e., input size muts fit into Index).  Use uint64_t if you have
     // ribbons holding billions of items.
-    using Index = uint32_t;
+    using Index = uint64_t;
     // An unsigned type to hold hash values. This should likely always be
     // uint64_t.
     using Hash = uint64_t;
@@ -290,12 +290,12 @@ constexpr size_t recommended_bucket_size =
 // think about, see below for some reasonable presets.
 template <size_t coeff_bits, size_t result_bits, ThreshMode mode = ThreshMode::twobit,
           bool sparse = false, bool interleaved = false, bool cls = false,
-          int bucket_sh = 0, typename Key = int, int min_buckets_per_thread = -1>
+          int bucket_sh = 0, typename Key = int64_t, int min_buckets_per_thread = -1>
 struct RConfig
     : public DefaultConfig<at_least_t<coeff_bits>, at_least_t<result_bits>, Key> {
     using Super =
         DefaultConfig<at_least_t<coeff_bits>, at_least_t<result_bits>, Key>;
-    using Index = uint32_t;
+    using Index = uint64_t;
     static constexpr Index kResultBits = result_bits;
     static constexpr ThreshMode kThreshMode =
         // if using CLS, override compression mode
