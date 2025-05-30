@@ -22,6 +22,7 @@
 #include <iostream>
 #include <type_traits>
 
+int mycntr=0;
 namespace ribbon {
 
 namespace {
@@ -162,11 +163,11 @@ public:
         Iterator begin, Iterator end,
         std::vector<std::conditional_t<
             kUseMHC, std::conditional_t<kIsFilter, mhc_or_key_t, std::pair<mhc_or_key_t, std::conditional_t<kUseVLR, ResultRowVLR, ResultRow>>>,
-            typename std::iterator_traits<Iterator>::value_type>> *bump_vec) {
+            typename std::iterator_traits<Iterator>::value_type>> *bump_vec, bool allowFalsePositive = false) {
         const auto input_size = end - begin;
 
         if constexpr (kUseVLR)
-            CalcRibbonSizesVLR(begin, end);
+            CalcRibbonSizesVLR(begin, end, allowFalsePositive);
 
         LOGC(Config::log) << "Constructing for " << storage_.GetNumSlots()
                           << " slots, " << storage_.GetNumStarts() << " starts, "
@@ -176,12 +177,13 @@ public:
         bool success;
         if constexpr (kUseMHC) {
             if constexpr (kUseVLR && kVLRShareMeta)
-                success = BandingAddRangeMHC(&storage_, hasher_, begin, end, bump_vec, num_ribbons_);
+                // FINDME
+                success = BandingAddRangeMHC(&storage_, hasher_, begin, end, bump_vec, num_ribbons_, allowFalsePositive);
             else
                 success = BandingAddRangeMHC(&storage_, hasher_, begin, end, bump_vec);
         } else {
             if constexpr (kUseVLR && kVLRShareMeta)
-                success = BandingAddRange(&storage_, hasher_, begin, end, bump_vec, num_ribbons_);
+                success = BandingAddRange(&storage_, hasher_, begin, end, bump_vec, num_ribbons_, allowFalsePositive);
             else
                 success = BandingAddRange(&storage_, hasher_, begin, end, bump_vec);
         }
@@ -208,10 +210,10 @@ public:
         Iterator begin, Iterator end,
         std::vector<std::conditional_t<
             kUseMHC, std::tuple<mhc_or_key_t, ResultRowVLR, ResultRowVLR>,
-            std::tuple<Key, ResultRowVLR, ResultRowVLR>>> *bump_vec) {
+            std::tuple<Key, ResultRowVLR, ResultRowVLR>>> *bump_vec, bool allowFalsePositive = false) {
 
         const size_t input_size = end - begin;
-        CalcRibbonSizesVLR(begin, end);
+        CalcRibbonSizesVLR(begin, end, allowFalsePositive);
         LOGC(Config::log) << "Constructing for " << storage_.GetNumSlots()
                           << " slots, " << storage_.GetNumStarts() << " starts, "
                           << storage_.GetNumBuckets() << " buckets";
@@ -451,7 +453,7 @@ protected:
 
     template <typename Iterator, typename C = Config>
     std::enable_if_t<C::kUseVLR, void>
-    CalcRibbonSizesVLR(Iterator begin, Iterator end) {
+    CalcRibbonSizesVLR(Iterator begin, Iterator end, bool allowFalsePositive = false) {
         rocksdb::StopWatchNano timer(true);
         const size_t input_size = end - begin;
         std::vector<size_t> ribbon_sizes(num_ribbons_);
@@ -479,9 +481,13 @@ protected:
             const ResultRowVLR rr = hasher_.GetResultRowVLRFromInput(*(begin + i));
             // there must be at least a 1 to mark the beginning of the actual value
             assert(rr != 0);
+
             // the first 1 is not part of the actual value
             const int num_zeroes = rocksdb::CountLeadingZeroBits(rr) + 1;
             const int num_bits = (sizeof(ResultRowVLR) * 8) - num_zeroes;
+            if(num_bits==0) {
+                continue;
+            }
             assert(num_bits != 0);
             // In toplevel (or if kVLRShareMeta is set), there is no bump mask.
             constexpr bool toplevel = kVLRShareMeta ||
@@ -495,12 +501,17 @@ protected:
             for (int bit = 0; bit < num_bits; ++bit) {
                 const int shift = num_bits - bit - 1;
                 // if the element wasn't bumped previously, it doesn't need to be inserted
-                if (((prev_bumped >> shift) & 0x1))
+                if (((prev_bumped >> shift) & 0x1) && (!allowFalsePositive || ((rr>>bit)&1)))
                     ribbon_sizes[(ribbon_start + bit) % num_ribbons_]++;
             }
         }
+        if(ribbon_sizes.empty()) {
+            std::cout<< "Ribbon is empty" << std::endl;
+            return;
+        }
         size_t num_slots = *std::max_element(ribbon_sizes.begin(), ribbon_sizes.end());
         num_slots = std::max(size_t{1}, static_cast<size_t>(slots_per_item_ * num_slots));
+        //std::cout<<"----------"<<(num_slots*num_ribbons_)<<std::endl;
         LOGC(Config::log) << "Calculating max ribbon size for " << input_size << " items took "
                           << timer.ElapsedNanos(true) / 1e6 << "ms";
         LOGC(Config::log) << "Total number of bits: " << std::accumulate(ribbon_sizes.begin(), ribbon_sizes.end(), 0) << "\n";
@@ -884,9 +895,9 @@ public:
 
     // MHC version
     template <typename Iterator, typename C = Config>
-    std::enable_if_t<C::kUseMHC, bool> AddRange(Iterator begin, Iterator end) {
+    std::enable_if_t<C::kUseMHC, bool> AddRange(Iterator begin, Iterator end, bool allowFalsePositive = false) {
         auto input = Super::PrepareAddRangeMHC(begin, end);
-        return AddRangeMHCInternal(input.get(), input.get() + (end - begin));
+        return AddRangeMHCInternal(input.get(), input.get() + (end - begin), allowFalsePositive);
     }
 
     void BackSubst() {
@@ -1051,7 +1062,7 @@ protected:
     }
 
     template <typename C = Config, typename Iterator>
-    std::enable_if_t<C::kUseMHC, bool> AddRangeMHCInternal(Iterator begin, Iterator end) {
+    std::enable_if_t<C::kUseMHC, bool> AddRangeMHCInternal(Iterator begin, Iterator end, bool allowFalsePositive = false) {
         const auto input_size = end - begin;
         std::vector<std::conditional_t<kUseVLR,
                                        std::conditional_t<kVLRShareMeta,
@@ -1065,7 +1076,7 @@ protected:
             0l, static_cast<ssize_t>((1 - slots_per_item_) * input_size)));
 
         // this calls either the vlr or non-vlr version automatically because of enable_if
-        if (!Super::AddRange(begin, end, &bumped_items))
+        if (!Super::AddRange(begin, end, &bumped_items, allowFalsePositive))
             return false;
 
         if (bumped_items.size() == 0)
@@ -1078,7 +1089,7 @@ protected:
             child_ribbon_.Prepare(child_slots);
         }
         return child_ribbon_.AddRangeMHCInternal(
-            bumped_items.data(), bumped_items.data() + bumped_items.size()
+            bumped_items.data(), bumped_items.data() + bumped_items.size(), allowFalsePositive
         );
     }
 
@@ -1306,7 +1317,7 @@ protected:
 
     // misnomer but needed for recursive construction
     template <typename Iterator>
-    bool AddRangeMHCInternal(Iterator begin, Iterator end) {
+    bool AddRangeMHCInternal(Iterator begin, Iterator end, bool allowFalsePositive = false) {
         bool success;
         // In the VLR version, we only know the number of slots after AddRange has been called,
         // so we have to wait before we can set orig_num_slots.
@@ -1315,13 +1326,14 @@ protected:
             // if VLR is used, we only know the number of slots after it is calculated by Super::AddRange
             if constexpr (kUseVLR) {
                 // This automatically calls different functions depending on the value of kVLRShareMeta.
-                success = Super::AddRange(begin, end, nullptr);
+                // FINDME
+                success = Super::AddRange(begin, end, nullptr, allowFalsePositive);
                 if (!num_slots_set) {
                     orig_num_slots_ = Super::storage_.GetNumSlots();
                     num_slots_set = true;
                 }
             } else {
-                success = Super::AddRange(begin, end, nullptr);
+                success = Super::AddRange(begin, end, nullptr, allowFalsePositive);
             }
             if (!success) {
                 // increase epsilon and try again

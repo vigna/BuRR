@@ -811,7 +811,7 @@ bool BandingAddRangeVLR(BandingStorage *bs, Hasher &hasher, Iterator begin, Iter
 template <typename BandingStorage, typename Hasher, typename Iterator,
           typename BumpStorage = std::vector<typename Hasher::mhc_t>>
 bool BandingAddRangeMHC(BandingStorage *bs, Hasher &hasher, Iterator begin,
-                        Iterator end, BumpStorage *bump_vec, typename BandingStorage::Index num_ribbons = 1) {
+                        Iterator end, BumpStorage *bump_vec, typename BandingStorage::Index num_ribbons = 1, bool allowFalsePositive = false) {
     static_assert(Hasher::kUseMHC, "you called the wrong method");
 
     using CoeffRow = typename BandingStorage::CoeffRow;
@@ -835,6 +835,9 @@ bool BandingAddRangeMHC(BandingStorage *bs, Hasher &hasher, Iterator begin,
     const auto num_items = end - begin;
     const Index num_starts = bs->GetNumStarts();
     const Index num_buckets = bs->GetNumBuckets();
+    if(num_buckets==0) {
+        return true;
+    }
     sLOG << "Constructing ribbon (MHC) with" << num_buckets
          << "buckets, num_starts =" << num_starts;
 
@@ -981,8 +984,13 @@ bool BandingAddRangeMHC(BandingStorage *bs, Hasher &hasher, Iterator begin,
             const Index ribbon_start = hasher.GetVLRIndex(hash, num_ribbons);
             const ResultRowVLR rr = hasher.GetResultRowVLRFromInput(*(begin + i));
 
+            if(rr==1) {
+                continue;
+            }
+
             // there must be at least a 1 to mark the beginning of the actual value
             assert(rr != 0);
+
             // the first 1 is not part of the actual value
             const int num_zeroes = rocksdb::CountLeadingZeroBits(rr) + 1;
             const int num_bits = (sizeof(ResultRowVLR) * 8) - num_zeroes;
@@ -1000,11 +1008,18 @@ bool BandingAddRangeMHC(BandingStorage *bs, Hasher &hasher, Iterator begin,
                 else
                     shift = num_bits - bit - 1;
 
-                auto [success, row] = BandingAdd<kFCA1>(bs, start, cr, static_cast<ResultRow>((rr >> shift) & 0x1), ribbon_idx);
+
+                ResultRowVLR bitRow = (rr >> shift) & 0x1;
+                if(allowFalsePositive && !bitRow) {
+                    continue;
+                }
+                auto [success, row] = BandingAdd<kFCA1>(bs, start, cr, static_cast<ResultRow>(bitRow), ribbon_idx);
                 if (!success) {
                     assert(all_good);
                     if (bump_vec == nullptr)
                         // bumping disabled, abort!
+
+                        // FINDME
                         return false;
                     // if we got this far, this is the first failure in this bucket
                     // (for this ribbon_idx), and we need to undo insertions with the same cval
@@ -1061,6 +1076,8 @@ bool BandingAddRangeMHC(BandingStorage *bs, Hasher &hasher, Iterator begin,
                 assert(all_good);
                 if (bump_vec == nullptr)
                     // bumping disabled, abort!
+
+                    // FINDME
                     return false;
                 // if we got this far, this is the first failure in this bucket,
                 // and we need to undo insertions with the same cval
@@ -1128,7 +1145,7 @@ bool BandingAddRangeMHC(BandingStorage *bs, Hasher &hasher, Iterator begin,
 
 template <typename BandingStorage, typename Hasher, typename Iterator, typename BumpStorage>
 bool BandingAddRangeMHCVLR(BandingStorage *bs, Hasher &hasher, Iterator begin, Iterator end,
-                           BumpStorage *bump_vec, typename BandingStorage::Index num_ribbons) {
+                           BumpStorage *bump_vec, typename BandingStorage::Index num_ribbons, bool allowFalsePositive = false) {
     static_assert(Hasher::kUseMHC && Hasher::kUseVLR && !Hasher::kVLRShareMeta && !Hasher::kIsFilter, "you called the wrong method");
 
     using CoeffRow = typename BandingStorage::CoeffRow;

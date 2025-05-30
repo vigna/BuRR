@@ -325,6 +325,9 @@ InterleavedRetrievalQuery(const typename HashTraits<Hasher>::mhc_or_key_t &key,
     constexpr bool debug = false;
     constexpr auto kCoeffBits = static_cast<Index>(sizeof(CoeffRow) * 8U);
 
+    if(iss.GetNumSlots()==0) {
+        return {};
+    }
     // don't query an empty ribbon, please
     assert(iss.GetNumSlots() >= kCoeffBits);
     const Hash hash = hasher.GetHash(key);
