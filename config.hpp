@@ -226,7 +226,7 @@ public:
     // Whether to print timings and other information about the construction.
     static constexpr bool log = false;
     // Whether to use variable length retrieval
-    static constexpr bool kUseVLR = true;
+    static constexpr bool kUseVLR = false;
     // Whether to use the same metadata for all ribbons when using VLR.
     static constexpr bool kVLRShareMeta = true;
     static constexpr bool kVLRFlipInputBits = true;
