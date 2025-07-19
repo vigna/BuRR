@@ -386,7 +386,7 @@ InterleavedRetrievalQuery(const typename HashTraits<Hasher>::mhc_or_key_t &key,
             else
                 --index;
         }
-        return std::make_pair(false, value);
+        return std::make_pair(false, value^static_cast<ResultRowVLR>(cr));
     } else {
         ResultRow sr = 0;
         const CoeffRow cr_left = cr << start_bit;

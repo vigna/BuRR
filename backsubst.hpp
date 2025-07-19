@@ -129,10 +129,6 @@ inline void BackSubstBlock(typename BandingStorage::CoeffRow *state,
             rr = bs.GetResult(i);
         }
 
-        if(cr==0) [[unlikely]] {
-            cr=CoeffRow(-1);
-            rr=ResultRow(-1);
-        }
         for (Index j = 0; j < num_columns; ++j) {
             // Compute next solution bit at row i, column j (see derivation below)
             CoeffRow tmp = state[j] << 1;

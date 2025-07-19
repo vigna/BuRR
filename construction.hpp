@@ -982,7 +982,7 @@ bool BandingAddRangeMHC(BandingStorage *bs, Hasher &hasher, Iterator begin,
 
         if constexpr (kUseVLR) {
             const Index ribbon_start = hasher.GetVLRIndex(hash, num_ribbons);
-            const ResultRowVLR rr = hasher.GetResultRowVLRFromInput(*(begin + i));
+            ResultRowVLR rr = hasher.GetResultRowVLRFromInput(*(begin + i));
 
             if(rr==1) {
                 continue;
@@ -996,6 +996,9 @@ bool BandingAddRangeMHC(BandingStorage *bs, Hasher &hasher, Iterator begin,
             const int num_bits = (sizeof(ResultRowVLR) * 8) - num_zeroes;
             assert(num_bits != 0);
 
+            const ResultRowVLR rrOrig=rr;
+            rr^=static_cast<ResultRowVLR>(cr);
+
             vlr_indeces.push_back(i);
             if constexpr (oneBitThresh)
                 vlr_unc_indeces.push_back(i);
@@ -1008,11 +1011,12 @@ bool BandingAddRangeMHC(BandingStorage *bs, Hasher &hasher, Iterator begin,
                 else
                     shift = num_bits - bit - 1;
 
-
-                ResultRowVLR bitRow = (rr >> shift) & 0x1;
-                if(allowFalsePositive && !bitRow) {
+                ResultRowVLR bitRowOrig = (rrOrig >> shift) & 0x1;
+                if(allowFalsePositive && !bitRowOrig) {
                     continue;
                 }
+
+                ResultRowVLR bitRow = (rr >> shift) & 0x1;
                 auto [success, row] = BandingAdd<kFCA1>(bs, start, cr, static_cast<ResultRow>(bitRow), ribbon_idx);
                 if (!success) {
                     assert(all_good);
