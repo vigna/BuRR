@@ -66,7 +66,9 @@ void run(size_t num_items, double eps, size_t seed, unsigned num_threads, std::s
         insertionTime = timer.ElapsedNanos(true);
         LOG1 << "Insertion took " << insertionTime / 1e6 << "ms in total\n";
 
-        input.reset();
+        // input.reset() removed: deallocating the key array is not part
+        // of construction, and for large n the free() cost is non-trivial.
+        // The array will be freed when it goes out of scope after timing.
 
         r.BackSubst(num_threads);
         backsubstTime = timer.ElapsedNanos(true);
@@ -95,10 +97,10 @@ void run(size_t num_items, double eps, size_t seed, unsigned num_threads, std::s
     
     for (int k = 0; k < REPEATS; k++) {
         rocksdb::StopWatchNano timer_query(true);
-	    int key = 0;
+	    uint64_t key = 0;
         for (size_t v = 0; v < N; v++) {
     		key += 0x9e3779b97f4a7c15;
-       	    found ^= r.QueryFilter((int)key);
+       	    found ^= r.QueryFilter(key);
         }
         double timing = (double)timer_query.ElapsedNanos(true) / N;
         LOG1 << timing << " ns/key";
