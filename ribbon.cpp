@@ -89,19 +89,22 @@ void run(size_t num_items, double eps, size_t seed, unsigned num_threads, std::s
         LOG1 << "Serialization took " << timer.ElapsedNanos(true) / 1e6 << "ms\n";
     }
 
+    if (no_queries)
+        return;
+
 	const uint64_t N = 100000000;
     const int REPEATS = 5;
-    bool found = false;
-
     std::vector<double> timings;
-    
+
     for (int k = 0; k < REPEATS; k++) {
         rocksdb::StopWatchNano timer_query(true);
 	    uint64_t key = 0;
+        uint64_t acc = 0;
         for (size_t v = 0; v < N; v++) {
     		key += 0x9e3779b97f4a7c15;
-       	    found ^= r.QueryFilter(key);
+       	    acc ^= r.QueryFilter(key);
         }
+        const volatile uint64_t _sink = acc;
         double timing = (double)timer_query.ElapsedNanos(true) / N;
         LOG1 << timing << " ns/key";
         timings.push_back(timing);
@@ -111,8 +114,7 @@ void run(size_t num_items, double eps, size_t seed, unsigned num_threads, std::s
 
     LOG1 << "Min: " << timings[0] << " Median: " << timings[timings.size() / 2]
          << " Max: " << timings[timings.size() - 1] << " Average: "
-         << reduce(timings.begin(), timings.end(), 0.0) / timings.size() << " ("
-         << found << ")";
+         << reduce(timings.begin(), timings.end(), 0.0) / timings.size();
 }
 
 
