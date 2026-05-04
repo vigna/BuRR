@@ -984,7 +984,7 @@ bool BandingAddRangeMHC(BandingStorage *bs, Hasher &hasher, Iterator begin,
             const Index ribbon_start = hasher.GetVLRIndex(hash, num_ribbons);
             ResultRowVLR rr = hasher.GetResultRowVLRFromInput(*(begin + i));
 
-            if(rr==1) {
+            if(allowFalsePositive && rr==1) {
                 continue;
             }
 

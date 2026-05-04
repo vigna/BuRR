@@ -56,7 +56,7 @@ void run(size_t num_items, double eps, size_t seed,
         r = ribbon_filter<depth, BuRRConfig>(slots_per_item, seed, num_ribbons);
         LOG1 << "Allocation took " << timer.ElapsedNanos(true) / 1e6 << "ms\n";
         LOG1 << "Adding rows to filter....";
-        r.AddRange(input.get(), input.get() + num_items, true);
+        r.AddRange(input.get(), input.get() + num_items);
         LOG1 << "Insertion took " << timer.ElapsedNanos(true) / 1e6 << "ms in total\n";
 
         input.reset();
@@ -77,6 +77,34 @@ void run(size_t num_items, double eps, size_t seed,
         LOG1 << "Ribbon size: " << bytes << " Bytes = " << (bytes * 1.0) / num_items
              << " Bytes per item\n";
     }
+    // Correctness check (always run before serialization).
+    // The VLR stores the data bits of the value but NOT the sentinel.
+    // With kVLRFlipOutputBits=true (default), data bits are at the LSB.
+    // For value v, bit_width(v) data bits are stored starting from the
+    // first ribbon.
+    if (values != nullptr) {
+        unsigned errors = 0;
+        size_t check = std::min(num_items, size_t{10000});
+        for (size_t i = 0; i < check; ++i) {
+            uint64_t got = r.QueryRetrieval(static_cast<Key>(i));
+            uint64_t v = values[i];
+            if (v == 0) continue;
+            unsigned bw = 64 - __builtin_clzll(v);
+            uint64_t mask = (uint64_t(1) << bw) - 1;
+            if ((got & mask) != v) {
+                if (errors < 10)
+                    LOG1 << "MISMATCH key=" << i << " value=" << v
+                         << " expected=0x" << std::hex << v
+                         << " got=0x" << (got & mask) << std::dec;
+                errors++;
+            }
+        }
+        if (errors > 0) {
+            LOG1 << "CORRECTNESS FAILED: " << errors << " / " << check << " mismatches";
+            return;
+        }
+    }
+
     if (ofile.length() != 0) {
         r.Serialize(ofile);
         LOG1 << "Serialization took " << timer.ElapsedNanos(true) / 1e6 << "ms\n";
