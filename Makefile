@@ -6,7 +6,7 @@ CFLAGS = -std=c++17 -march=native -D_REENTRANT $(INCLUDES)
 LDFLAGS = sorter.o tlx/build/tlx/libtlx.a -lpthread -ltbb -latomic
 BITS = -DRIBBON_BITS=$(RIBBON_BITS)
 
-OPTFLAGS = -O3 -DNDEBUG -march=native
+OPTFLAGS = -O3 -DNDEBUG -march=native -fno-strict-aliasing
 DEFFLAGS = -O2 -march=native
 DBGFLAGS = -g #-fsanitize=address
 
