@@ -3,9 +3,9 @@ CFLAGS = -std=c++17 -Wall -Wextra -pedantic -Werror $(INCLUDES)
 LDFLAGS = sorter.o tlx/build/tlx/libtlx.a -lpthread
 BITS = -DRIBBON_BITS=$(RIBBON_BITS)
 
-OPTFLAGS = -O3 -DNDEBUG -march=native
-DEFFLAGS = -O2 -march=native
-DBGFLAGS = -g #-fsanitize=address
+OPTFLAGS = -O3 -DNDEBUG -march=native -fno-strict-aliasing
+DEFFLAGS = -O3 -march=native -fno-strict-aliasing
+DBGFLAGS = -g -fno-strict-aliasing
 
 all: ribbon
 
@@ -22,7 +22,7 @@ debug:	sorter.o ribbon.cpp *.hpp rocksdb/*.h libtlx Makefile
 	$(CXX) $(DBGFLAGS) $(BITS) $(CFLAGS) -o debug$(RIBBON_BITS) ribbon.cpp $(LDFLAGS)
 
 tests:	tests.cpp *.hpp rocksdb/*.h libtlx Makefile
-	$(CXX) -O2 $(CFLAGS) -o tests tests.cpp -lgtest $(LDFLAGS)
+	$(CXX) -O3 -fno-strict-aliasing $(CFLAGS) -o tests tests.cpp -lgtest $(LDFLAGS)
 
 parbench: sorter.o parbench.cpp *.hpp rocksdb/*.h libtlx Makefile
 	$(CXX) $(OPTFLAGS) $(BITS) $(CFLAGS) -o parbench$(RIBBON_BITS) parbench.cpp $(LDFLAGS)
@@ -36,5 +36,5 @@ pardbg: sorter.o parbench.cpp *.hpp rocksdb/*.h libtlx Makefile
 libtlx:
 	mkdir -p tlx/build; \
 	cd tlx/build; \
-	cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS=-g0 -GNinja ..; \
+	cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS="-g0 -fno-strict-aliasing" -GNinja ..; \
 	ninja
