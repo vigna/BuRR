@@ -36,6 +36,9 @@
 
 using namespace ribbon;
 
+// Number of construction threads (0 = number of query threads)
+static unsigned num_build_threads = 0;
+
 template <uint8_t depth, typename Config>
 void run(unsigned num_filters, size_t num_slots, size_t num_queries, double eps,
          size_t seed, unsigned num_threads) {
@@ -56,6 +59,8 @@ void run(unsigned num_filters, size_t num_slots, size_t num_queries, double eps,
     std::vector<ribbon_t> ribbons(num_filters);
 
     // Generate seeds
+    // A seed for each filter, followed by a seed for each query thread in
+    // each of the two query phases
     std::vector<size_t> seeds(num_filters + 2 * num_threads);
     {
         std::seed_seq seq({seed >> 32, seed});
@@ -69,11 +74,17 @@ void run(unsigned num_filters, size_t num_slots, size_t num_queries, double eps,
 
     // all threads use the same input keys to make queries easier
     auto input = std::make_unique<Key[]>(num_items);
-    std::iota(input.get(), input.get() + num_items, 0);
+    // Key(0): with an int initial value the sequence wraps at 2^31
+    std::iota(input.get(), input.get() + num_items, Key(0));
 
     std::mutex stats_lock;
     tlx::Aggregate<double> agg_init, agg_add, agg_backsub, agg_total, agg_size,
         agg_tl_bumped, agg_tl_empty, agg_tl_frac_empty, agg_tl_thresh_bytes;
+    // With fewer filters than construction threads, each filter is built
+    // with several threads
+    const unsigned pool_threads =
+        num_build_threads ? num_build_threads : num_threads;
+    const unsigned filter_threads = std::max(1u, pool_threads / num_filters);
     auto construct = [&](unsigned id) {
         [[maybe_unused]] rocksdb::StopWatchNano timer(true), total_timer(true);
 
@@ -81,12 +92,12 @@ void run(unsigned num_filters, size_t num_slots, size_t num_queries, double eps,
         auto t_init = timer.ElapsedNanos(true);
         LOG << "Ribbon " << id << " allocation took " << t_init / 1e6 << "ms";
 
-        ribbons[id].AddRange(input.get(), input.get() + num_items);
+        ribbons[id].AddRange(input.get(), input.get() + num_items, filter_threads);
         auto t_add = timer.ElapsedNanos(true);
         LOG << "Ribbon " << id << " insertion took " << t_add / 1e6
             << "ms in total";
 
-        ribbons[id].BackSubst();
+        ribbons[id].BackSubst(filter_threads);
         auto t_backsub = timer.ElapsedNanos(true);
         LOG << "Ribbon " << id << " backsubstitution took " << t_backsub / 1e6
             << "ms in total";
@@ -127,7 +138,7 @@ void run(unsigned num_filters, size_t num_slots, size_t num_queries, double eps,
              << " overhead=" << relsize - 100 << " threads=" << num_threads;
     };
 
-    tlx::ThreadPool pool(num_threads);
+    tlx::ThreadPool pool(pool_threads);
     for (unsigned i = 0; i < num_filters; i++) {
         pool.enqueue([&, i]() { construct(i); });
     }
@@ -155,7 +166,7 @@ void run(unsigned num_filters, size_t num_slots, size_t num_queries, double eps,
     auto query = [&](unsigned id, bool positive, unsigned offset = 0) {
         constexpr size_t block_size = (size_t{1} << 20);
         std::vector<std::pair<Key, unsigned>> queries(block_size);
-        pcg64 rng(seeds[id + num_threads + offset]);
+        pcg64 rng(seeds[num_filters + id + offset]);
 
         size_t count = 0, my_found = 0;
 
@@ -171,8 +182,10 @@ void run(unsigned num_filters, size_t num_slots, size_t num_queries, double eps,
                 Key key = rocksdb::FastRangeGeneric(rand, num_items);
                 if (!positive)
                     key += num_items;
-                unsigned filter = rocksdb::FastRangeGeneric(
-                    rand ^ 0x876f170be4f1fcb9UL, num_filters);
+                // The filter must come from an independent random word: the
+                // high bits of rand ^ c, which FastRange would use, are a
+                // function of the key
+                unsigned filter = rocksdb::FastRangeGeneric(rng(), num_filters);
                 queries[item] = std::make_pair(key, filter);
             }
             queries.resize(block_items);
@@ -256,7 +269,8 @@ void run(unsigned num_filters, size_t num_slots, size_t num_queries, double eps,
              << " threads=" << num_threads;
     }
 
-    const uint64_t found = std::accumulate(num_fps.begin(), num_fps.end(), 0);
+    const uint64_t found =
+        std::accumulate(num_fps.begin(), num_fps.end(), uint64_t{0});
     const double fprate = found * 1.0 / (num_threads * num_queries),
                  ratio = fprate * (1ul << Config::kResultBits);
     const double relsize =
@@ -386,6 +400,8 @@ int main(int argc, char** argv) {
     cmd.add_unsigned('d', "depth", depth, "ribbon recursion depth");
     cmd.add_double('e', "epsilon", eps, "epsilon, #items = filtersize/(1+epsilon)");
     cmd.add_unsigned('t', "threads", num_threads, "number of query threads");
+    cmd.add_unsigned('b', "build_threads", num_build_threads,
+                     "number of construction threads (0 = query threads)");
     cmd.add_bool('1', "onebit", onebit,
                  "use one-plus-a-little-bit threshold compression");
     cmd.add_bool('2', "twobit", twobit, "use two-bit threshold compression");

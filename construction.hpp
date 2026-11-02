@@ -139,6 +139,7 @@ void ProcessInput(
     using Hash = typename Hasher::Hash;
     const Index num_starts = bs->GetNumStarts();
 #ifdef RIBBON_PASS_HASH
+    using Hash = typename Hasher::Hash;
     constexpr bool sparse = Hasher::kSparseCoeffs && Hasher::kCoeffBits < 128;
 #endif
     for (Index i = start_idx; i < end_idx; ++i) {
@@ -653,6 +654,7 @@ std::tuple<bool, size_t, uint64_t> BandingAddRangeBase(BandingStorage *bs, Hashe
 
     const auto num_items = end - begin; // std::distance(begin, end);
 #ifdef RIBBON_PASS_HASH
+    using Hash = typename Hasher::Hash;
     constexpr bool sparse = Hasher::kSparseCoeffs && Hasher::kCoeffBits < 128;
     auto input = std::make_unique<
         std::tuple<Index, Index, std::conditional_t<sparse, uint32_t, Hash>>[]>(
@@ -1086,6 +1088,7 @@ std::tuple<bool, size_t, uint64_t> BandingAddRangeParallel(BandingStorage *bs, H
 
     const auto num_items = end - begin; // std::distance(begin, end);
 #ifdef RIBBON_PASS_HASH
+    using Hash = typename Hasher::Hash;
     constexpr bool sparse = Hasher::kSparseCoeffs && Hasher::kCoeffBits < 128;
     auto input = std::make_unique<
         std::tuple<Index, Index, std::conditional_t<sparse, uint32_t, Hash>>[]>(

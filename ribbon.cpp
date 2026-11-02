@@ -100,12 +100,29 @@ void run(size_t num_items, double eps, size_t seed, unsigned num_threads, std::s
         rocksdb::StopWatchNano timer_query(true);
 	    uint64_t key = 0;
         uint64_t acc = 0;
+#ifdef RIBBON_POSITIVE_QUERIES
+        // Positive queries (benchpos target): the keys are [0..num_items), and
+        // we map the Weyl sequence into this interval with FastRange
+        for (size_t v = 0; v < N; v++) {
+    		key += 0x9e3779b97f4a7c15;
+       	    acc += r.QueryFilter(
+                static_cast<Key>(rocksdb::FastRangeGeneric(key, num_items)));
+        }
+#else
         for (size_t v = 0; v < N; v++) {
     		key += 0x9e3779b97f4a7c15;
        	    acc ^= r.QueryFilter(key);
         }
+#endif
         const volatile uint64_t _sink = acc;
         double timing = (double)timer_query.ElapsedNanos(true) / N;
+#ifdef RIBBON_POSITIVE_QUERIES
+        if (acc != N) {
+            std::cerr << "Positive check failed: found " << acc << " of " << N
+                      << " keys\n";
+            exit(1);
+        }
+#endif
         LOG1 << timing << " ns/key";
         timings.push_back(timing);
     }

@@ -18,6 +18,10 @@ sorter.o: sorter.cpp sorter.hpp minimal_hasher.hpp
 bench:	sorter.o ribbon.cpp *.hpp rocksdb/*.h libtlx Makefile
 	$(CXX) $(OPTFLAGS) $(BITS) $(CFLAGS) -o bench$(RIBBON_BITS) ribbon.cpp $(LDFLAGS)
 
+# Same as bench, but queries keys of the filter (positive queries)
+benchpos:	sorter.o ribbon.cpp *.hpp rocksdb/*.h libtlx Makefile
+	$(CXX) $(OPTFLAGS) $(BITS) -DRIBBON_POSITIVE_QUERIES $(CFLAGS) -o benchpos$(RIBBON_BITS) ribbon.cpp $(LDFLAGS)
+
 ribbon:	sorter.o ribbon.cpp *.hpp rocksdb/*.h libtlx Makefile
 	$(CXX) $(DEFFLAGS) $(BITS) $(CFLAGS) -o ribbon$(RIBBON_BITS) ribbon.cpp $(LDFLAGS)
 
