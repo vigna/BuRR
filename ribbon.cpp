@@ -108,6 +108,14 @@ void run(size_t num_items, double eps, size_t seed, unsigned num_threads, std::s
        	    acc += r.QueryFilter(
                 static_cast<Key>(rocksdb::FastRangeGeneric(key, num_items)));
         }
+#elif defined(RIBBON_FUNCTION_QUERIES)
+        // Static-function queries (benchfunc target) on keys of the
+        // structure: the r-bit row is computed, but never compared.
+        for (size_t v = 0; v < N; v++) {
+    		key += 0x9e3779b97f4a7c15;
+       	    acc ^= r.QueryFunction(
+                static_cast<Key>(rocksdb::FastRangeGeneric(key, num_items)));
+        }
 #else
         for (size_t v = 0; v < N; v++) {
     		key += 0x9e3779b97f4a7c15;

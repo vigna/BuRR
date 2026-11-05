@@ -22,6 +22,10 @@ bench:	sorter.o ribbon.cpp *.hpp rocksdb/*.h libtlx Makefile
 benchpos:	sorter.o ribbon.cpp *.hpp rocksdb/*.h libtlx Makefile
 	$(CXX) $(OPTFLAGS) $(BITS) -DRIBBON_POSITIVE_QUERIES $(CFLAGS) -o benchpos$(RIBBON_BITS) ribbon.cpp $(LDFLAGS)
 
+# Same as bench, but static-function queries (no comparison) on keys
+benchfunc:	sorter.o ribbon.cpp *.hpp rocksdb/*.h libtlx Makefile
+	$(CXX) $(OPTFLAGS) $(BITS) -DRIBBON_FUNCTION_QUERIES $(CFLAGS) -o benchfunc$(RIBBON_BITS) ribbon.cpp $(LDFLAGS)
+
 ribbon:	sorter.o ribbon.cpp *.hpp rocksdb/*.h libtlx Makefile
 	$(CXX) $(DEFFLAGS) $(BITS) $(CFLAGS) -o ribbon$(RIBBON_BITS) ribbon.cpp $(LDFLAGS)
 

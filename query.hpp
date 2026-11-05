@@ -252,6 +252,54 @@ InterleavedRetrievalQuery(const typename HashTraits<Hasher>::mhc_or_key_t &key,
     return std::make_pair(false, sr);
 }
 
+// Static-function query: InterleavedFilterQuery without the comparisons.
+// Like the filter query (and unlike InterleavedRetrievalQuery), it combines
+// the two words of each column before computing the parity, so it computes
+// one parity per result bit, and stores the bit instead of comparing it.
+template <typename InterleavedSolutionStorage, typename Hasher>
+std::pair<bool, typename InterleavedSolutionStorage::ResultRow>
+InterleavedFunctionQuery(const typename HashTraits<Hasher>::mhc_or_key_t &key,
+                         const Hasher &hasher,
+                         const InterleavedSolutionStorage &iss) {
+    using Index = typename InterleavedSolutionStorage::Index;
+    using CoeffRow = typename InterleavedSolutionStorage::CoeffRow;
+    using ResultRow = typename InterleavedSolutionStorage::ResultRow;
+
+    constexpr auto kCoeffBits = static_cast<Index>(sizeof(CoeffRow) * 8U);
+    constexpr auto num_columns = InterleavedSolutionStorage::kResultBits;
+
+    assert(iss.GetNumSlots() >= kCoeffBits);
+    const typename HashTraits<Hasher>::hash_t hash = hasher.GetHash(key);
+    const Index start_slot = hasher.GetStart(hash, iss.GetNumStarts());
+    const Index bucket = hasher.GetBucket(start_slot);
+
+    const Index start_block_num = start_slot / kCoeffBits;
+    const Index segment = start_block_num * num_columns;
+    iss.PrefetchQuery(segment);
+
+    const Index val = hasher.GetIntraBucketFromStart(start_slot),
+                cval = hasher.Compress(val);
+
+    if (CheckBumped(val, cval, bucket, hasher, iss))
+        return std::make_pair(true, ResultRow(0));
+
+    const Index start_bit = start_slot % kCoeffBits;
+    const CoeffRow cr = hasher.GetCoeffs(hash);
+    const CoeffRow cr_left = cr << start_bit;
+    const CoeffRow cr_right =
+        cr >> static_cast<unsigned>((kCoeffBits - start_bit) % kCoeffBits);
+    const Index maybe_num_columns = (start_bit != 0) * num_columns;
+
+    ResultRow sr = 0;
+    for (Index i = 0; i < num_columns; ++i) {
+        CoeffRow soln_data =
+            (iss.GetSegment(segment + i) & cr_left) |
+            (iss.GetSegment(segment + maybe_num_columns + i) & cr_right);
+        sr |= static_cast<ResultRow>(rocksdb::BitParity(soln_data)) << i;
+    }
+    return std::make_pair(false, sr);
+}
+
 // Filter query a key from InterleavedFilterQuery.
 template <typename InterleavedSolutionStorage, typename Hasher>
 std::pair<bool, bool>

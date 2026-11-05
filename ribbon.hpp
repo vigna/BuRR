@@ -147,6 +147,27 @@ public:
         }
     }
 
+    // Static-function query on the stored rows: like QueryFilterMHC, but it
+    // returns the r-bit row without comparing it with the fingerprint, as
+    // a retrieval (static function) query would do. Also valid on filters.
+    template <typename C = Config>
+    inline std::enable_if_t<C::kUseMHC, std::pair<bool, ResultRow>>
+    QueryFunctionMHC(const mhc_or_key_t mhc) const {
+        if constexpr (kUseInterleavedSol) {
+            if (TLX_UNLIKELY(sol_.GetNumSlots() == 0))
+                return std::make_pair(false, ResultRow(0));
+            return InterleavedFunctionQuery(mhc, hasher_, sol_);
+        } else if constexpr (kUseCacheLineStorage) {
+            if (TLX_UNLIKELY(sol_.GetNumSlots() == 0))
+                return std::make_pair(false, ResultRow(0));
+            return SimpleRetrievalQuery(mhc, hasher_, sol_);
+        } else {
+            if (TLX_UNLIKELY(storage_.GetNumSlots() == 0))
+                return std::make_pair(false, ResultRow(0));
+            return SimpleRetrievalQuery(mhc, hasher_, storage_);
+        }
+    }
+
     inline std::pair<bool, ResultRow> QueryRetrieval(const Key &key) const {
         if constexpr (kIsFilter || kUseMHC) {
             assert(false);
@@ -716,6 +737,21 @@ public:
             return found;
     }
 
+    // Static-function query (see ribbon_base::QueryFunctionMHC).
+    inline ResultRow QueryFunction(const Key &key) const {
+        return QueryFunctionMHC(this->hasher_.GetMHC(key));
+    }
+
+    template <typename C = Config>
+    inline std::enable_if_t<C::kUseMHC, ResultRow>
+    QueryFunctionMHC(const mhc_or_key_t mhc) const {
+        auto [was_bumped, result] = Super::QueryFunctionMHC(mhc);
+        if (was_bumped)
+            return child_ribbon_.QueryFunctionMHC(mhc);
+        else
+            return result;
+    }
+
     inline ResultRow QueryRetrieval(const Key &key) const {
         if constexpr (kUseMHC) {
             const auto mhc = this->hasher_.GetMHC(key);
@@ -955,6 +991,19 @@ public:
         // see comment in QueryFilter
         //assert(!was_bumped);
         return found;
+    }
+
+    // Static-function query (see ribbon_base::QueryFunctionMHC).
+    inline ResultRow QueryFunction(const Key &key) const {
+        return QueryFunctionMHC(this->hasher_.GetMHC(key));
+    }
+
+    template <typename C = Config>
+    inline std::enable_if_t<C::kUseMHC, ResultRow>
+    QueryFunctionMHC(const typename Super::mhc_or_key_t mhc) const {
+        auto [was_bumped, result] = Super::QueryFunctionMHC(mhc);
+        // see comment in QueryFilter
+        return result;
     }
 
     ResultRow QueryRetrieval(const Key &key) const {
