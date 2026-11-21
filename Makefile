@@ -26,6 +26,11 @@ benchpos:	sorter.o ribbon.cpp *.hpp rocksdb/*.h libtlx Makefile
 benchfunc:	sorter.o ribbon.cpp *.hpp rocksdb/*.h libtlx Makefile
 	$(CXX) $(OPTFLAGS) $(BITS) -DRIBBON_FUNCTION_QUERIES $(CFLAGS) -o benchfunc$(RIBBON_BITS) ribbon.cpp $(LDFLAGS)
 
+# Same as benchfunc, but a BuRR static function (retrieval data structure)
+# mapping key i to i, rather than a filter
+benchretr:	sorter.o ribbon.cpp *.hpp rocksdb/*.h libtlx Makefile
+	$(CXX) $(OPTFLAGS) $(BITS) -DRIBBON_RETRIEVAL $(CFLAGS) -o benchretr$(RIBBON_BITS) ribbon.cpp $(LDFLAGS)
+
 ribbon:	sorter.o ribbon.cpp *.hpp rocksdb/*.h libtlx Makefile
 	$(CXX) $(DEFFLAGS) $(BITS) $(CFLAGS) -o ribbon$(RIBBON_BITS) ribbon.cpp $(LDFLAGS)
 
@@ -37,6 +42,11 @@ tests:	tests.cpp *.hpp rocksdb/*.h libtlx Makefile
 
 parbench: sorter.o parbench.cpp *.hpp rocksdb/*.h libtlx Makefile
 	$(CXX) $(OPTFLAGS) $(BITS) $(CFLAGS) -o parbench$(RIBBON_BITS) parbench.cpp $(LDFLAGS)
+
+# Same as parbench, but with BuRR static functions mapping key i to i, and
+# positive queries only
+parbenchretr: sorter.o parbench.cpp *.hpp rocksdb/*.h libtlx Makefile
+	$(CXX) $(OPTFLAGS) $(BITS) -DRIBBON_RETRIEVAL $(CFLAGS) -o parbenchretr$(RIBBON_BITS) parbench.cpp $(LDFLAGS)
 
 parrun: sorter.o parbench.cpp *.hpp rocksdb/*.h libtlx Makefile
 	$(CXX) $(DEFFLAGS) $(BITS) $(CFLAGS) -o parrun$(RIBBON_BITS) parbench.cpp $(LDFLAGS)

@@ -36,6 +36,17 @@
 
 using namespace ribbon;
 
+// With RIBBON_RETRIEVAL (parbenchretr target), we build BuRR static functions
+// (retrieval data structures, that is, BuRR with kIsFilter = false) instead of
+// filters: key i is mapped to i, so RIBBON_BITS must be at least the number of
+// bits of the largest key. Queries are positive only, and each checks that
+// the value of the key is the key.
+#ifdef RIBBON_RETRIEVAL
+static constexpr bool kRetrieval = true;
+#else
+static constexpr bool kRetrieval = false;
+#endif
+
 // Number of construction threads (0 = number of query threads)
 static unsigned num_build_threads = 0;
 
@@ -73,9 +84,20 @@ void run(unsigned num_filters, size_t num_slots, size_t num_queries, double eps,
     }
 
     // all threads use the same input keys to make queries easier
-    auto input = std::make_unique<Key[]>(num_items);
-    // Key(0): with an int initial value the sequence wraps at 2^31
-    std::iota(input.get(), input.get() + num_items, Key(0));
+    using input_t = std::conditional_t<kRetrieval, std::pair<Key, ResultRow>, Key>;
+    auto input = std::make_unique<input_t[]>(num_items);
+    if constexpr (kRetrieval) {
+        if (kResultBits < 64 && num_items > (uint64_t{1} << kResultBits)) {
+            std::cerr << "The keys do not fit in " << kResultBits << " bits.\n";
+            exit(1);
+        }
+        // Key i is mapped to i
+        for (size_t i = 0; i < num_items; i++)
+            input[i] = std::make_pair(Key(i), ResultRow(i));
+    } else {
+        // Key(0): with an int initial value the sequence wraps at 2^31
+        std::iota(input.get(), input.get() + num_items, Key(0));
+    }
 
     std::mutex stats_lock;
     tlx::Aggregate<double> agg_init, agg_add, agg_backsub, agg_total, agg_size,
@@ -193,7 +215,11 @@ void run(unsigned num_filters, size_t num_slots, size_t num_queries, double eps,
             sLOG << "Generated" << block_items << "items";
 
             for (const auto [key, filter] : queries) {
-                bool found = ribbons[filter].QueryFilter(key);
+                bool found;
+                if constexpr (kRetrieval)
+                    found = ribbons[filter].QueryFunction(key) == ResultRow(key);
+                else
+                    found = ribbons[filter].QueryFilter(key);
                 assert(!positive || found);
                 my_found += found;
             }
@@ -245,10 +271,11 @@ void run(unsigned num_filters, size_t num_slots, size_t num_queries, double eps,
          << t_pos_aggregate * 1.0 / (num_queries * num_threads) << "ns per key";
 
     /**************************************************************************/
+    // Static functions have no negative queries
     threads.clear();
     check_nanos = 0;
     timer.Start();
-    for (unsigned i = 0; i < num_threads; i++) {
+    for (unsigned i = 0; i < num_threads && !kRetrieval; i++) {
         threads.emplace_back(query, i, false, /* seed offset */ num_threads);
     }
     for (auto& t : threads)
@@ -301,9 +328,15 @@ void run(unsigned num_filters, size_t num_slots, size_t num_queries, double eps,
          << " overhead=" << relsize - 100 << " ok=" << all_ok
          << " tposagg=" << t_pos_aggregate << " tpostot=" << t_pos_total
          << " tpospq=" << t_pos_aggregate * 1.0 / (num_threads * num_queries)
-         << " tnegagg=" << t_neg_aggregate << " tnegtot=" << t_neg_total
-         << " tneqpq=" << t_neg_aggregate * 1.0 / (num_threads * num_queries)
-         << " fps=" << found << " fpr=" << fprate << " ratio=" << ratio
+         << (kRetrieval ? std::string()
+                        : " tnegagg=" + std::to_string(t_neg_aggregate) +
+                              " tnegtot=" + std::to_string(t_neg_total) +
+                              " tneqpq=" +
+                              std::to_string(t_neg_aggregate * 1.0 /
+                                             (num_threads * num_queries)) +
+                              " fps=" + std::to_string(found) +
+                              " fpr=" + std::to_string(fprate) +
+                              " ratio=" + std::to_string(ratio))
          << " threads=" << num_threads;
 }
 
@@ -315,6 +348,7 @@ struct QRConfig
     static constexpr bool log = false; // quiet
     using Key = int64_t;
     // using Index = uint64_t;
+    static constexpr bool kIsFilter = !kRetrieval;
 };
 
 template <ThreshMode mode, uint8_t depth, size_t L, size_t r, bool interleaved,

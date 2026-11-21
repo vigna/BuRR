@@ -25,6 +25,20 @@
 
 using namespace ribbon;
 
+#ifdef RIBBON_RETRIEVAL
+// With RIBBON_RETRIEVAL (benchretr target), we build a BuRR static function
+// (a retrieval data structure, that is, BuRR with kIsFilter = false) instead
+// of a filter: key i is mapped to i, so RIBBON_BITS must be at least the
+// number of bits of the largest key, and queries are positive.
+template <typename C>
+struct Retrieval : public C {
+    static constexpr bool kIsFilter = false;
+};
+#define RIBBON_CONFIG(...) Retrieval<RConfig<__VA_ARGS__>>
+#else
+#define RIBBON_CONFIG(...) RConfig<__VA_ARGS__>
+#endif
+
 bool no_queries = false;
 
 // NOTE: When an input file is given, the tests here still require eps and num_slots to
@@ -44,6 +58,12 @@ void run(size_t num_items, double eps, size_t seed, unsigned num_threads, std::s
         std::cerr << "Input size * 2 too large for configured Key type, negative queries in this simple test may give inaccurate results.\n";
         exit(1);
     }
+#ifdef RIBBON_RETRIEVAL
+    if (kResultBits < 64 && num_items > (uint64_t{1} << kResultBits)) {
+        std::cerr << "The keys do not fit in " << kResultBits << " bits.\n";
+        exit(1);
+    }
+#endif
     LOG1 << "Running simple test with " << num_slots << " slots, eps=" << eps
          << " -> " << num_items << " items, seed=" << seed
          << " config: L=" << kCoeffBits << " B=" << kBucketSize
@@ -55,8 +75,15 @@ void run(size_t num_items, double eps, size_t seed, unsigned num_threads, std::s
     uint64_t insertionTime = 0;
     uint64_t backsubstTime = 0;
     if (ifile.length() == 0) {
+#ifdef RIBBON_RETRIEVAL
+        // Key i is mapped to i
+        auto input = std::make_unique<std::pair<Key, ResultRow>[]>(num_items);
+        for (size_t i = 0; i < num_items; i++)
+            input[i] = std::make_pair(Key(i), ResultRow(i));
+#else
         auto input = std::make_unique<Key[]>(num_items);
         std::iota(input.get(), input.get() + num_items, Key(0));
+#endif
         LOG1 << "Input generation took " << timer.ElapsedNanos(true) / 1e6 << "ms";
 	    rocksdb::StopWatchNano timer_constr(true);
         r = ribbon_filter<depth, Config>(num_slots, slots_per_item, seed);
@@ -96,6 +123,24 @@ void run(size_t num_items, double eps, size_t seed, unsigned num_threads, std::s
     const int REPEATS = 5;
     std::vector<double> timings;
 
+#ifdef RIBBON_RETRIEVAL
+    // Check the values of the keys that are queried (not timed)
+    {
+        uint64_t key = 0, wrong = 0;
+        for (size_t v = 0; v < N; v++) {
+            key += 0x9e3779b97f4a7c15;
+            const auto k = rocksdb::FastRangeGeneric(key, num_items);
+            wrong += r.QueryFunction(static_cast<Key>(k)) != ResultRow(k);
+        }
+        if (wrong != 0) {
+            std::cerr << "Retrieval check failed: " << wrong << " wrong values of " << N
+                      << " keys\n";
+            exit(1);
+        }
+        LOG1 << "Retrieval check: " << N << " values OK";
+    }
+#endif
+
     for (int k = 0; k < REPEATS; k++) {
         rocksdb::StopWatchNano timer_query(true);
 	    uint64_t key = 0;
@@ -108,9 +153,9 @@ void run(size_t num_items, double eps, size_t seed, unsigned num_threads, std::s
        	    acc += r.QueryFilter(
                 static_cast<Key>(rocksdb::FastRangeGeneric(key, num_items)));
         }
-#elif defined(RIBBON_FUNCTION_QUERIES)
-        // Static-function queries (benchfunc target) on keys of the
-        // structure: the r-bit row is computed, but never compared.
+#elif defined(RIBBON_FUNCTION_QUERIES) || defined(RIBBON_RETRIEVAL)
+        // Static-function queries (benchfunc and benchretr targets) on keys
+        // of the structure: the r-bit row is computed, but never compared.
         for (size_t v = 0; v < N; v++) {
     		key += 0x9e3779b97f4a7c15;
        	    acc ^= r.QueryFunction(
@@ -148,13 +193,13 @@ template <ThreshMode mode, uint8_t depth, size_t L, size_t r, bool interleaved,
 void dispatch_shift(int shift, Args&... args) {
     switch (shift) {
         case 0:
-            run<depth, RConfig<L, r, mode, sparse, interleaved, cls, 0>>(args...);
+            run<depth, RIBBON_CONFIG(L, r, mode, sparse, interleaved, cls, 0)>(args...);
             break;
         case -1:
-            run<depth, RConfig<L, r, mode, sparse, interleaved, cls, -1>>(args...);
+            run<depth, RIBBON_CONFIG(L, r, mode, sparse, interleaved, cls, -1)>(args...);
             break;
         case 1:
-            run<depth, RConfig<L, r, mode, sparse, interleaved, cls, 1>>(args...);
+            run<depth, RIBBON_CONFIG(L, r, mode, sparse, interleaved, cls, 1)>(args...);
             break;
         default: LOG1 << "Unsupported bucket size shift: " << shift;
     }
@@ -168,7 +213,13 @@ void dispatch_sparse(bool sparse, Args&... args) {
         if constexpr (interleaved) {
             LOG1 << "Sparse coefficients + interleaved sol doesn't make sense";
         } else {
+#ifdef RIBBON_RETRIEVAL
+            // The sorter is instantiated for sparse coefficients only for
+            // filters
+            LOG1 << "Sparse coefficients are not supported for retrieval";
+#else
             dispatch_shift<mode, depth, L, r, interleaved, cls, true>(args...);
+#endif
         }
     } else {
         dispatch_shift<mode, depth, L, r, interleaved, cls, false>(args...);
